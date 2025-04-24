@@ -147,30 +147,23 @@ function downloadFile(url, destinationPath, progressCallback = noop) {
 
 // Extract .tar.xz files
 async function extractTarXz(srcPath, destDir) {
-  // 1. Open the .xz file as a Node.js Readable
+  // 1. Open .xz as a Node.js Readable
   const nodeStream = fs.createReadStream(srcPath);
 
   // 2. Convert Node.js Readable → WHATWG ReadableStream
-  const webStream = Readable.toWeb(nodeStream);
+  const webStream = Readable.toWeb(nodeStream);               // :contentReference[oaicite:0]{index=0}
 
-  // 3. Wrap in XZ decompressor
+  // 3. Decompress XZ (expects a WHATWG ReadableStream)
   const xzStream = new XzReadableStream(webStream);
 
-  // 4. Create tar extractor
-  const extract = tar.extract({
-    cwd: destDir,
-    strip: 1,              // optional: remove top-level folder
-    onentry: entry => {
-      // you can tap into each entry if needed
-    },
-  });
+  // 4. Convert back to a Node.js Readable so `pipeline` works
+  const decompressed = Readable.fromWeb(xzStream);            // :contentReference[oaicite:1]{index=1}
 
-  // 5. Pipe decompressed tar into extractor
-  await pipeline(
-    xzStream,
-    extract
-  );
+  // 5. Extract TAR entries into destDir
+  const extract = tar.extract({ cwd: destDir, strip: 1 });
 
+  // 6. Pipe through
+  await pipeline(decompressed, extract);
   console.log('Extraction complete!');
 }
 
