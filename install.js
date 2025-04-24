@@ -146,85 +146,52 @@ function downloadFile(url, destinationPath, progressCallback = noop) {
 
 function extractTarXz(filePath, outputDir) {
   return new Promise((resolve, reject) => {
-    try {
-      // Check if file exists and is readable
-      fs.access(filePath, fs.constants.F_OK | fs.constants.R_OK, (err) => {
-        if (err) {
-          return reject(new Error(`Cannot access file: ${err.message}`));
-        }
-        
-        console.log(`Extracting XZ archive: ${filePath}`);
-        
-        // Create temporary tar file path
-        const tempTarPath = path.join(path.dirname(filePath), `temp-${Date.now()}.tar`);
-        
-        // Instead of loading the entire file into memory, process it in chunks
-        const fileSize = fs.statSync(filePath).size;
-        const fileStream = fs.createReadStream(filePath);
-        const tempFile = fs.createWriteStream(tempTarPath);
-        
-        let processedChunks = 0;
-        
-        // Process data in chunks to avoid memory issues
-        fileStream.on('data', (chunk) => {
-          try {
-            const decompressed = lzma.decompress(chunk);
-            tempFile.write(Buffer.from(decompressed));
-            processedChunks++;
-            
-            if (processedChunks % 10 === 0) {
-              console.log(`Processed ${processedChunks} chunks of XZ data`);
+      try {
+          // Check if file exists and is readable
+          fs.access(filePath, fs.constants.F_OK | fs.constants.R_OK, (err) => {
+            if (err) {
+              return reject(new Error(`Cannot access file: ${err.message}`));
             }
-          } catch (err) {
-            console.error('Error during XZ decompression:', err);
-            // Continue processing - single chunk failure shouldn't abort everything
-          }
-        });
-        
-        fileStream.on('end', () => {
-          tempFile.end();
-        });
-        
-        tempFile.on('finish', () => {
-          console.log(`XZ decompression complete. Extracting TAR to ${outputDir}`);
-          
-          // Extract the TAR file
-          tar.extract({
-            file: tempTarPath,
-            cwd: outputDir,
-            strip: 1,
-          })
-            .then(() => {
-              // Cleanup temp file
-              fs.unlink(tempTarPath, (err) => {
-                if (err) console.warn(`Warning: Could not delete temporary file ${tempTarPath}:`, err);
-                resolve();
-              });
-            })
-            .catch((err) => {
-              // Try to clean up temp file even on failure
-              fs.unlink(tempTarPath, () => {});
-              reject(err);
-            });
-        });
-        
-        fileStream.on('error', (err) => {
-          tempFile.end();
-          fs.unlink(tempTarPath, () => {});
+            
+            console.log(`Extracting XZ archive: ${filePath}`);
+            
+            // Use native node decompression instead of lzma-purejs
+            const { execFile } = require('child_process');
+            const xzArgs = ['-dc', filePath];
+            const tarArgs = ['-xf', '-', '-C', outputDir, '--strip-components=1'];
+            
+            console.log('Using native xz and tar commands for extraction');
+            
+            try {
+              // Check if xz is available
+              execFile('xz', ['--version'], (err) => {
+                if (err) {
+                  console.log('Native xz not available, falling back to tar with z option');
+                  // Fallback to tar with z option if xz is not available
+                  execFile('tar', ['-xf', filePath, '-C', outputDir, '--strip-components=1'], (err) => {
+                    if (err) {
+                      return reject(new Error(`Tar extraction failed: ${err.message}`));
+                    }
+                    resolve();
+                  });
+                  return;
+                }
+                
+                // Use pipe between xz and tar
+                const xz = execFile('xz', xzArgs);
+                const tar = execFile('tar', tarArgs);
+                
+          });
+        } catch (err) {
           reject(err);
-        });
-        
-        tempFile.on('error', (err) => {
-          fs.unlink(tempTarPath, () => {});
-          reject(err);
-        });
+        }
       });
-    } catch (err) {
+    }
+    catch (err) {
       reject(err);
     }
   });
 }
-
 
 // Extract .zip files
 function extractZip(filePath, outputDir) {
