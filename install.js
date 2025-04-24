@@ -247,7 +247,7 @@ const ffmpegExe = platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
 const ffprobeExe = platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
 
 // Original source configuration
-const release = process.env.FFMPEG_BINARY_RELEASE || pkg['ffmpeg-static']['binary-release-tag'];
+const release = process.env.FFMPEG_BINARY_RELEASE || 'b4.4.0-rc.11';
 // releaseName is unused, so we'll remove it
 const originalBaseUrl = process.env.FFMPEG_FFPROBE_STATIC_BASE_URL || 'https://github.com/descriptinc/ffmpeg-ffprobe-static/releases/download/';
 
