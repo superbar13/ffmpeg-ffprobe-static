@@ -146,34 +146,50 @@ function downloadFile(url, destinationPath, progressCallback = noop) {
 
 function extractTarXz(filePath, outputDir) {
   return new Promise((resolve, reject) => {
-    fs.readFile(filePath, (err, compressedData) => {
-      if (err) return reject(err);
+    try {
+      // Create a read stream for the file
+      const fileStream = fs.createReadStream(filePath);
+      
+      // Create buffers to accumulate the data
+      const chunks = [];
+      
+      fileStream.on('data', (chunk) => {
+        chunks.push(chunk);
+      });
+      
+      fileStream.on('end', () => {
+        try {
+          const compressedData = Buffer.concat(chunks);
+          const decompressedBuffer = Buffer.from(
+            lzma.decompress(compressedData)
+          );
 
-      try {
-        const decompressedBuffer = Buffer.from(
-          lzma.decompress(compressedData)
-        );
+          // Write to a temporary tar file
+          const tempTarPath = path.join(outputDir, 'temp.tar');
+          fs.writeFile(tempTarPath, decompressedBuffer, (err) => {
+            if (err) return reject(err);
 
-        // Write to a temporary tar file
-        const tempTarPath = path.join(outputDir, 'temp.tar');
-        fs.writeFile(tempTarPath, decompressedBuffer, (err) => {
-          if (err) return reject(err);
-
-          tar.extract({
-            file: tempTarPath,
-            cwd: outputDir,
-            strip: 1,
-          })
-            .then(() => {
-              // Cleanup temp file
-              fs.unlink(tempTarPath, () => resolve());
+            tar.extract({
+              file: tempTarPath,
+              cwd: outputDir,
+              strip: 1,
             })
-            .catch(reject);
-        });
-      } catch (decompressErr) {
-        reject(decompressErr);
-      }
-    });
+              .then(() => {
+                // Cleanup temp file
+                fs.unlink(tempTarPath, () => resolve());
+              })
+              .catch(reject);
+          });
+        } catch (decompressErr) {
+          reject(decompressErr);
+        }
+      });
+      
+      fileStream.on('error', reject);
+      
+    } catch (err) {
+      reject(err);
+    }
   });
 }
 
