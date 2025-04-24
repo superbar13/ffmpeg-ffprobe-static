@@ -144,16 +144,39 @@ function downloadFile(url, destinationPath, progressCallback = noop) {
   return promise;
 }
 
-// Extract .tar.xz files
 function extractTarXz(filePath, outputDir) {
   return new Promise((resolve, reject) => {
-    fs.createReadStream(filePath)
-      .pipe(lzma.decompress())
-      .pipe(tar.extract({ cwd: outputDir, strip: 1 }))
-      .on('error', reject)
-      .on('end', resolve);
+    fs.readFile(filePath, (err, compressedData) => {
+      if (err) return reject(err);
+
+      try {
+        const decompressedBuffer = Buffer.from(
+          lzma.decompress(compressedData)
+        );
+
+        // Write to a temporary tar file
+        const tempTarPath = path.join(outputDir, 'temp.tar');
+        fs.writeFile(tempTarPath, decompressedBuffer, (err) => {
+          if (err) return reject(err);
+
+          tar.extract({
+            file: tempTarPath,
+            cwd: outputDir,
+            strip: 1,
+          })
+            .then(() => {
+              // Cleanup temp file
+              fs.unlink(tempTarPath, () => resolve());
+            })
+            .catch(reject);
+        });
+      } catch (decompressErr) {
+        reject(decompressErr);
+      }
+    });
   });
 }
+
 
 // Extract .zip files
 function extractZip(filePath, outputDir) {
