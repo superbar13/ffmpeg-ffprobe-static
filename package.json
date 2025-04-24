@@ -50,10 +50,10 @@
     "@derhuerst/http-basic": "^8.2.0",
     "env-paths": "^2.2.0",
     "https-proxy-agent": "^5.0.0",
+    "lzma-purejs": "^0.9.3",
     "mkdirp": "^1.0.4",
     "progress": "^2.0.3",
     "tar": "^6.1.11",
-    "xz-decompress": "^0.2.2",
     "yauzl": "^2.10.0"
   },
   "devDependencies": {
