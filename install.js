@@ -157,7 +157,7 @@ function extractTarXz(filePath, outputDir) {
 
     xz.stdout.pipe(tar.stdin);
 
-    xz.stdout.on('data', (data) => {
+    xz.stderr.on('data', (data) => {
       console.log(`xz stdout: ${data}`);
     });
 
