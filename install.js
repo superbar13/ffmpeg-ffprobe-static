@@ -148,7 +148,7 @@ function downloadFile(url, destinationPath, progressCallback = noop) {
 function extractTarXz(filePath, outputDir) {
   return new Promise((resolve, reject) => {
     fs.createReadStream(filePath)
-      .pipe(lzma.createDecompressor())
+      .pipe(lzma.decompress())
       .pipe(tar.extract({ cwd: outputDir, strip: 1 }))
       .on('error', reject)
       .on('end', resolve);
