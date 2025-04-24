@@ -150,7 +150,8 @@ function extractTarXz(filePath, outputDir) {
     // Check if xz is available
     console.log('Using native xz and tar with piping');
     const xz = spawn('xz', ['-dc', filePath]);
-    const tar = spawn('tar', ['-xf', '-', '-C', outputDir, '--strip-components=1']);
+    // Only extract bin directory to save space, exclude man pages and other unnecessary files
+    const tar = spawn('tar', ['-xf', '-', '-C', outputDir, '--strip-components=1', 'bin/ffmpeg', 'bin/ffprobe']);
 
     xz.stdout.pipe(tar.stdin);
 
