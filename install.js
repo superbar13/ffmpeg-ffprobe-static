@@ -255,7 +255,7 @@ const originalBaseUrl = process.env.FFMPEG_FFPROBE_STATIC_BASE_URL || 'https://g
 const getOriginalPlatformName = () => {
   switch (platform) {
     case 'win32':
-      return arch === 'arm64' ? 'win-arm64' : 'win-x64';
+      return arch === 'arm64' ? 'win-arm64' : 'win32-x64';
     case 'darwin':
       return arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
     case 'linux':
