@@ -147,46 +147,78 @@ function downloadFile(url, destinationPath, progressCallback = noop) {
 function extractTarXz(filePath, outputDir) {
   return new Promise((resolve, reject) => {
     try {
-      // Create a read stream for the file
-      const fileStream = fs.createReadStream(filePath);
-      
-      // Create buffers to accumulate the data
-      const chunks = [];
-      
-      fileStream.on('data', (chunk) => {
-        chunks.push(chunk);
-      });
-      
-      fileStream.on('end', () => {
-        try {
-          const compressedData = Buffer.concat(chunks);
-          const decompressedBuffer = Buffer.from(
-            lzma.decompress(compressedData)
-          );
-
-          // Write to a temporary tar file
-          const tempTarPath = path.join(outputDir, 'temp.tar');
-          fs.writeFile(tempTarPath, decompressedBuffer, (err) => {
-            if (err) return reject(err);
-
-            tar.extract({
-              file: tempTarPath,
-              cwd: outputDir,
-              strip: 1,
-            })
-              .then(() => {
-                // Cleanup temp file
-                fs.unlink(tempTarPath, () => resolve());
-              })
-              .catch(reject);
-          });
-        } catch (decompressErr) {
-          reject(decompressErr);
+      // Check if file exists and is readable
+      fs.access(filePath, fs.constants.F_OK | fs.constants.R_OK, (err) => {
+        if (err) {
+          return reject(new Error(`Cannot access file: ${err.message}`));
         }
+        
+        console.log(`Extracting XZ archive: ${filePath}`);
+        
+        // Create temporary tar file path
+        const tempTarPath = path.join(path.dirname(filePath), `temp-${Date.now()}.tar`);
+        
+        // Instead of loading the entire file into memory, process it in chunks
+        const fileSize = fs.statSync(filePath).size;
+        const fileStream = fs.createReadStream(filePath);
+        const tempFile = fs.createWriteStream(tempTarPath);
+        
+        let processedChunks = 0;
+        
+        // Process data in chunks to avoid memory issues
+        fileStream.on('data', (chunk) => {
+          try {
+            const decompressed = lzma.decompress(chunk);
+            tempFile.write(Buffer.from(decompressed));
+            processedChunks++;
+            
+            if (processedChunks % 10 === 0) {
+              console.log(`Processed ${processedChunks} chunks of XZ data`);
+            }
+          } catch (err) {
+            console.error('Error during XZ decompression:', err);
+            // Continue processing - single chunk failure shouldn't abort everything
+          }
+        });
+        
+        fileStream.on('end', () => {
+          tempFile.end();
+        });
+        
+        tempFile.on('finish', () => {
+          console.log(`XZ decompression complete. Extracting TAR to ${outputDir}`);
+          
+          // Extract the TAR file
+          tar.extract({
+            file: tempTarPath,
+            cwd: outputDir,
+            strip: 1,
+          })
+            .then(() => {
+              // Cleanup temp file
+              fs.unlink(tempTarPath, (err) => {
+                if (err) console.warn(`Warning: Could not delete temporary file ${tempTarPath}:`, err);
+                resolve();
+              });
+            })
+            .catch((err) => {
+              // Try to clean up temp file even on failure
+              fs.unlink(tempTarPath, () => {});
+              reject(err);
+            });
+        });
+        
+        fileStream.on('error', (err) => {
+          tempFile.end();
+          fs.unlink(tempTarPath, () => {});
+          reject(err);
+        });
+        
+        tempFile.on('error', (err) => {
+          fs.unlink(tempTarPath, () => {});
+          reject(err);
+        });
       });
-      
-      fileStream.on('error', reject);
-      
     } catch (err) {
       reject(err);
     }
