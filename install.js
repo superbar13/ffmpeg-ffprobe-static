@@ -276,9 +276,9 @@ const arch = process.env.npm_config_arch || os.arch();
 const platform = process.env.npm_config_platform || os.platform();
 
 // Create temp directory
-const tempDir = path.join(__dirname, `temp-${Date.now()}`);
-const extractDir = path.join(tempDir, 'extracted');
+const tempDir = path.join(__dirname, `temp`);
 if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+const extractDir = path.join(tempDir, 'extracted');
 if (!fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
 
 // Create base directory for ffmpeg/ffprobe
@@ -454,13 +454,3 @@ ffmpegPromise
     console.error('FFprobe installation failed:', err);
     process.exit(1);
   });
-
-
-// remove tempDir if it exists
-if (fs.existsSync(tempDir)) {
-  fs.rmSync(tempDir, { recursive: true, force: true });
-  console.log(`Removed temporary directory: ${tempDir}`);
-}
-else {
-  console.log(`Temporary directory does not exist: ${tempDir}`);
-}
