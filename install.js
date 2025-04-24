@@ -147,23 +147,27 @@ function downloadFile(url, destinationPath, progressCallback = noop) {
 
 // Extract .tar.xz files
 async function extractTarXz(srcPath, destDir) {
-  // 1. Open .xz as a Node.js Readable
-  const nodeStream = fs.createReadStream(srcPath);
+  // 1. Create Node.js Readable from the .tar.xz file
+  const fileStream = fs.createReadStream(srcPath);
 
-  // 2. Convert Node.js Readable → WHATWG ReadableStream
-  const webStream = Readable.toWeb(nodeStream);               // :contentReference[oaicite:0]{index=0}
+  // 2. Convert Node Readable → WHATWG ReadableStream for xz-decompress
+  const webStream = Readable.toWeb(fileStream);                // Web Stream API :contentReference[oaicite:5]{index=5}
 
-  // 3. Decompress XZ (expects a WHATWG ReadableStream)
+  // 3. Run it through the XZ decompressor (expects a WHATWG ReadableStream)
   const xzStream = new XzReadableStream(webStream);
 
-  // 4. Convert back to a Node.js Readable so `pipeline` works
-  const decompressed = Readable.fromWeb(xzStream);            // :contentReference[oaicite:1]{index=1}
+  // 4. Convert back: WHATWG → Node.js Readable so pipeline() can consume it
+  const decompressed = Readable.fromWeb(xzStream);             // Dual interop :contentReference[oaicite:6]{index=6}
 
-  // 5. Extract TAR entries into destDir
-  const extract = tar.extract({ cwd: destDir, strip: 1 });
+  // 5. Prepare a tar extractor as the Writable destination
+  const extractor = tar.extract({ cwd: destDir, strip: 1 });
 
-  // 6. Pipe through
-  await pipeline(decompressed, extract);
+  // 6. Pipe (Readable → Writable) with proper ordering
+  await pipeline(
+    decompressed,  // source must be a Readable :contentReference[oaicite:7]{index=7}
+    extractor      // destination must be a Writable
+  );
+
   console.log('Extraction complete!');
 }
 
