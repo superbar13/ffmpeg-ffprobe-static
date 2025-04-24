@@ -2,85 +2,93 @@
 
 var fs = require("fs");
 var os = require("os");
-const {encode: encodeQuery} = require('querystring')
-const {strictEqual} = require('assert')
-const envPaths = require('env-paths')
-const FileCache = require('@derhuerst/http-basic/lib/FileCache').default
-const {extname} = require('path')
+const path = require('path');
+const {encode: encodeQuery} = require('querystring');
+const {strictEqual} = require('assert');
+const envPaths = require('env-paths');
+const FileCache = require('@derhuerst/http-basic/lib/FileCache').default;
+const {extname} = require('path');
 var ProgressBar = require("progress");
-var request = require('@derhuerst/http-basic')
-const {createGunzip} = require('zlib')
-const {pipeline} = require('stream')
-var ffmpegPath = require(".");
+var request = require('@derhuerst/http-basic');
+const {createGunzip} = require('zlib');
+const {pipeline} = require('stream');
+const {createUnzip} = require('zlib');
+const tar = require('tar');
+const yauzl = require('yauzl');
+const mkdirp = require('mkdirp');
+var {ffmpegPath, ffprobePath} = require(".");
 var pkg = require("./package");
 
 const exitOnError = (err) => {
-  console.error(err)
-  process.exit(1)
-}
-const exitOnErrorOrWarnWith = (msg) => (err) => {
-  if (err.statusCode === 404) console.warn(msg)
-  else exitOnError(err)
-}
+  console.error(err);
+  process.exit(1);
+};
 
-if (!ffmpegPath) {
-  exitOnError('ffmpeg-static install failed: No binary found for architecture')
-}
+const warnWith = (msg) => (err) => {
+  console.warn(msg);
+};
 
-try {
-  if (fs.statSync(ffmpegPath).isFile()) {
-    console.info('ffmpeg is installed already.')
-    process.exit(0)
+// Check if binaries already exist
+if (ffmpegPath && ffprobePath) {
+  try {
+    if (fs.statSync(ffmpegPath).isFile() && fs.statSync(ffprobePath).isFile()) {
+      console.info('ffmpeg/ffprobe is installed already.');
+      process.exit(0);
+    }
+  } catch (err) {
+    if (err && err.code !== 'ENOENT') exitOnError(err);
   }
-} catch (err) {
-  if (err && err.code !== 'ENOENT') exitOnError(err)
 }
 
-let agent = false
-// https://github.com/request/request/blob/a9557c9e7de2c57d92d9bab68a416a87d255cd3d/lib/getProxyFromURI.js#L66-L71
+// Configure proxy if needed
+let agent = false;
 const proxyUrl = (
   process.env.HTTPS_PROXY ||
   process.env.https_proxy ||
   process.env.HTTP_PROXY ||
   process.env.http_proxy
-)
+);
 if (proxyUrl) {
-  const HttpsProxyAgent = require('https-proxy-agent')
-  const {hostname, port, protocol} = new URL(proxyUrl)
-  agent = new HttpsProxyAgent({hostname, port, protocol})
+  const HttpsProxyAgent = require('https-proxy-agent');
+  const {hostname, port, protocol} = new URL(proxyUrl);
+  agent = new HttpsProxyAgent({hostname, port, protocol});
 }
 
-// https://advancedweb.hu/how-s3-signed-urls-work/
+// Normalize S3 URLs
 const normalizeS3Url = (url) => {
-  url = new URL(url)
-  if (url.hostname.slice(-17) !== '.s3.amazonaws.com') return url.href
+  url = new URL(url);
+  if (url.hostname.slice(-17) !== '.s3.amazonaws.com') return url.href;
   const query = Array.from(url.searchParams.entries())
-  .filter(([key]) => key.slice(0, 6).toLowerCase() !== 'x-amz-')
-  .reduce((query, [key, val]) => ({...query, [key]: val}), {})
-  url.search = encodeQuery(query)
-  return url.href
-}
+    .filter(([key]) => key.slice(0, 6).toLowerCase() !== 'x-amz-')
+    .reduce((query, [key, val]) => ({...query, [key]: val}), {});
+  url.search = encodeQuery(query);
+  return url.href;
+};
+
 strictEqual(
   normalizeS3Url('https://example.org/foo?bar'),
   'https://example.org/foo?bar'
-)
+);
 strictEqual(
   normalizeS3Url('https://github-production-release-asset-2e65be.s3.amazonaws.com/29458513/26341680-4231-11ea-8e36-ae454621d74a?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIWNJYAX4CSVEH53A%2F20200405%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20200405T225358Z&X-Amz-Expires=300&X-Amz-Signature=d6415097af04cf62ea9b69d3c1a421278e96bcb069afa48cf021ec3b6941bae4&X-Amz-SignedHeaders=host&actor_id=0&response-content-disposition=attachment%3B%20filename%3Ddarwin-x64&response-content-type=application%2Foctet-stream'),
   'https://github-production-release-asset-2e65be.s3.amazonaws.com/29458513/26341680-4231-11ea-8e36-ae454621d74a?actor_id=0&response-content-disposition=attachment%3B%20filename%3Ddarwin-x64&response-content-type=application%2Foctet-stream'
-)
+);
 
-const cache = new FileCache(envPaths(pkg.name).cache)
+// Configure cache
+const cache = new FileCache(envPaths(pkg.name).cache);
 cache.getCacheKey = (url) => {
-  return FileCache.prototype.getCacheKey(normalizeS3Url(url))
-}
+  return FileCache.prototype.getCacheKey(normalizeS3Url(url));
+};
 
 const isGzUrl = (url) => {
-  const path = new URL(url).pathname.split('/')
-  const filename = path[path.length - 1]
-  return filename && extname(filename) === '.gz'
-}
+  const path = new URL(url).pathname.split('/');
+  const filename = path[path.length - 1];
+  return filename && extname(filename) === '.gz';
+};
 
-const noop = () => {}
+const noop = () => {};
+
+// Download file with progress reporting
 function downloadFile(url, destinationPath, progressCallback = noop) {
   let fulfill, reject;
   let totalBytes = 0;
@@ -100,33 +108,33 @@ function downloadFile(url, destinationPath, progressCallback = noop) {
     retry: true,
   }, (err, response) => {
     if (err || response.statusCode !== 200) {
-      err = err || new Error('Download failed.')
+      err = err || new Error('Download failed.');
       if (response) {
-        err.url = response.url
-        err.statusCode = response.statusCode
+        err.url = response.url;
+        err.statusCode = response.statusCode;
       }
-      reject(err)
+      reject(err);
       return;
     }
 
     const file = fs.createWriteStream(destinationPath);
     const streams = isGzUrl(url)
       ? [response.body, createGunzip(), file]
-      : [response.body, file]
+      : [response.body, file];
     pipeline(
       ...streams,
       (err) => {
         if (err) {
-          err.url = response.url
-          err.statusCode = response.statusCode
-          reject(err)
-        } else fulfill()
+          err.url = response.url;
+          err.statusCode = response.statusCode;
+          reject(err);
+        } else fulfill();
       }
-    )
+    );
 
     if (!response.fromCache && progressCallback) {
-      const cLength = response.headers["content-length"]
-      totalBytes = cLength ? parseInt(cLength, 10) : null
+      const cLength = response.headers["content-length"];
+      totalBytes = cLength ? parseInt(cLength, 10) : null;
       response.body.on('data', (chunk) => {
         progressCallback(chunk.length, totalBytes);
       });
@@ -136,45 +144,243 @@ function downloadFile(url, destinationPath, progressCallback = noop) {
   return promise;
 }
 
-let progressBar = null;
-function onProgress(deltaBytes, totalBytes) {
-  if (totalBytes === null) return;
-  if (!progressBar) {
-    progressBar = new ProgressBar(`Downloading ffmpeg ${releaseName} [:bar] :percent :etas `, {
-      complete: "|",
-      incomplete: " ",
-      width: 20,
-      total: totalBytes
-    });
-  }
-
-  progressBar.tick(deltaBytes);
+// Extract .tar.xz files
+function extractTarXz(filePath, outputDir) {
+  return new Promise((resolve, reject) => {
+    fs.createReadStream(filePath)
+      .pipe(createUnzip())
+      .pipe(tar.extract({
+        cwd: outputDir,
+        strip: 1 // Remove the top-level directory
+      }))
+      .on('error', reject)
+      .on('end', resolve);
+  });
 }
 
-const release = (
-  process.env.FFMPEG_BINARY_RELEASE ||
-  pkg['ffmpeg-static']['binary-release-tag']
-)
-const releaseName = (
-  pkg['ffmpeg-static']['binary-release-name'] ||
-  release
-)
-const arch = process.env.npm_config_arch || os.arch()
-const platform = process.env.npm_config_platform || os.platform()
+// Extract .zip files
+function extractZip(filePath, outputDir) {
+  return new Promise((resolve, reject) => {
+    yauzl.open(filePath, {lazyEntries: true}, (err, zipfile) => {
+      if (err) return reject(err);
+      
+      zipfile.on('entry', (entry) => {
+        const entryPath = entry.fileName.split('/').slice(1).join('/'); // Remove top-level directory
+        if (/\/$/.test(entry.fileName)) {
+          // Directory entry
+          mkdirp.sync(path.join(outputDir, entryPath));
+          zipfile.readEntry();
+        } else {
+          // File entry
+          zipfile.openReadStream(entry, (err, readStream) => {
+            if (err) return reject(err);
+            
+            const outputPath = path.join(outputDir, entryPath);
+            mkdirp.sync(path.dirname(outputPath));
+            
+            const writeStream = fs.createWriteStream(outputPath);
+            readStream.pipe(writeStream);
+            
+            writeStream.on('close', () => {
+              zipfile.readEntry();
+            });
+          });
+        }
+      });
+      
+      zipfile.on('end', resolve);
+      zipfile.on('error', reject);
+      zipfile.readEntry();
+    });
+  });
+}
 
-const baseUrl = `https://github.com/eugeneware/ffmpeg-static/releases/download/${release}`
-const downloadUrl = `${baseUrl}/${platform}-${arch}.gz`
-const readmeUrl = `${baseUrl}/${platform}-${arch}.README`
-const licenseUrl = `${baseUrl}/${platform}-${arch}.LICENSE`
+function getProgressIndicator(tool) {
+  let progressBar = null;
+  
+  return (deltaBytes, totalBytes) => {
+    if (progressBar == null) {
+      progressBar = new ProgressBar(`Downloading ${tool} [:bar] :percent :etas `, {
+        complete: "|",
+        incomplete: " ",
+        width: 20,
+        total: totalBytes,
+      });
+    }
+    if(progressBar.total !== totalBytes) {
+      progressBar.total = totalBytes;
+    }
+    progressBar.tick(deltaBytes);
+  };
+}
 
-downloadFile(downloadUrl, ffmpegPath, onProgress)
-.then(() => {
-  fs.chmodSync(ffmpegPath, 0o755) // make executable
-})
-.catch(exitOnError)
+// Determine platform and architecture
+const arch = process.env.npm_config_arch || os.arch();
+const platform = process.env.npm_config_platform || os.platform();
 
-.then(() => downloadFile(readmeUrl, `${ffmpegPath}.README`))
-.catch(exitOnErrorOrWarnWith('Failed to download the ffmpeg README.'))
+// Create temp directory
+const tempDir = path.join(os.tmpdir(), `ffmpeg-static-${Date.now()}`);
+const extractDir = path.join(tempDir, 'extracted');
+if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+if (!fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
 
-.then(() => downloadFile(licenseUrl, `${ffmpegPath}.LICENSE`))
-.catch(exitOnErrorOrWarnWith('Failed to download the ffmpeg LICENSE.'))
+// Create base directory for ffmpeg/ffprobe
+const binDir = path.dirname(ffmpegPath);
+if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
+
+// Define the binary executable names based on platform
+const ffmpegExe = platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+const ffprobeExe = platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
+
+// Original source configuration
+const release = process.env.FFMPEG_BINARY_RELEASE || pkg['ffmpeg-static']['binary-release-tag'];
+const releaseName = pkg['ffmpeg-static']['binary-release-name'] || release;
+const originalBaseUrl = process.env.FFMPEG_FFPROBE_STATIC_BASE_URL || 'https://github.com/descriptinc/ffmpeg-ffprobe-static/releases/download/';
+
+// Platform-specific naming for original source
+const getOriginalPlatformName = () => {
+  switch (platform) {
+    case 'win32':
+      return arch === 'arm64' ? 'win-arm64' : 'win-x64';
+    case 'darwin':
+      return arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+    case 'linux':
+      return arch === 'arm64' ? 'linux-arm64' : 'linux-x64';
+    default:
+      exitOnError(`Unsupported platform: ${platform}`);
+  }
+};
+
+// Platform-specific naming for FFmpeg BnqDzj builds
+const getFFmpegCustomPlatformName = () => {
+  switch (platform) {
+    case 'win32':
+      return arch === 'arm64' ? 'winarm64' : 'win64';
+    case 'linux':
+      return arch === 'arm64' ? 'linuxarm64' : 'linux64';
+    default:
+      exitOnError(`Unsupported platform: ${platform}`);
+  }
+};
+
+const originalPlatformName = getOriginalPlatformName();
+
+// Configure FFmpeg download based on platform
+let ffmpegDownloadUrl;
+let ffmpegDownloadPath;
+let isCustomFFmpeg = false;
+
+if (platform === 'darwin') {
+  // Use original source for macOS
+  ffmpegDownloadUrl = `${originalBaseUrl}${release}/ffmpeg-${originalPlatformName}`;
+  ffmpegDownloadPath = ffmpegPath;
+  console.log(`[ffmpeg-static] Platform: ${platform}, Architecture: ${arch} - Using original source`);
+} else {
+  // Use BnqDzj source for Windows and Linux
+  isCustomFFmpeg = true;
+  const ffmpegBaseUrl = 'https://github.com/BnqDzj/FFmpeg-Builds-nonfree/releases/download/latest';
+  const ffmpegPlatformName = getFFmpegCustomPlatformName();
+  const ffmpegFileExtension = platform === 'win32' ? 'zip' : 'tar.xz';
+  const ffmpegFileName = `ffmpeg-master-latest-${ffmpegPlatformName}-nonfree.${ffmpegFileExtension}`;
+  ffmpegDownloadUrl = `${ffmpegBaseUrl}/${ffmpegFileName}`;
+  ffmpegDownloadPath = path.join(tempDir, ffmpegFileName);
+  console.log(`[ffmpeg-static] Platform: ${platform}, Architecture: ${arch} - Using BnqDzj source`);
+}
+
+console.log(`[ffmpeg-static] Downloading FFmpeg from: ${ffmpegDownloadUrl}`);
+
+// Configure FFprobe download (always from original source)
+const ffprobeDownloadUrl = `${originalBaseUrl}${release}/ffprobe-${originalPlatformName}`;
+console.log(`[ffprobe-static] Downloading FFprobe from: ${ffprobeDownloadUrl}`);
+
+// Download and install FFmpeg
+let ffmpegPromise;
+
+if (isCustomFFmpeg) {
+  // For Windows/Linux: Download, extract, and copy FFmpeg from BnqDzj
+  ffmpegPromise = downloadFile(ffmpegDownloadUrl, ffmpegDownloadPath, getProgressIndicator('ffmpeg'))
+    .then(() => {
+      console.log(`FFmpeg download complete. Extracting...`);
+      const fileExtension = platform === 'win32' ? 'zip' : 'tar.xz';
+      if (fileExtension === 'zip') {
+        return extractZip(ffmpegDownloadPath, extractDir);
+      } else {
+        return extractTarXz(ffmpegDownloadPath, extractDir);
+      }
+    })
+    .then(() => {
+      console.log('FFmpeg extraction complete. Copying binary...');
+      
+      // Find the bin directory in extracted files
+      const binPath = path.join(extractDir, 'bin');
+      
+      // Copy ffmpeg to destination
+      fs.copyFileSync(path.join(binPath, ffmpegExe), ffmpegPath);
+      
+      // Make executable on Unix systems
+      if (platform !== 'win32') {
+        fs.chmodSync(ffmpegPath, 0o755);
+      }
+      
+      console.log(`Successfully installed ffmpeg to ${ffmpegPath}`);
+    });
+} else {
+  // For macOS: Download FFmpeg directly from original source
+  ffmpegPromise = downloadFile(ffmpegDownloadUrl, ffmpegDownloadPath, getProgressIndicator('ffmpeg'))
+    .then(() => {
+      // Make executable on Unix systems
+      if (platform !== 'win32') {
+        fs.chmodSync(ffmpegPath, 0o755);
+      }
+      console.log(`Successfully installed ffmpeg to ${ffmpegPath}`);
+      
+      // Try to download README and LICENSE for ffmpeg
+      const ffmpegReadmeUrl = `${originalBaseUrl}${release}/${originalPlatformName}.README`;
+      const ffmpegLicenseUrl = `${originalBaseUrl}${release}/${originalPlatformName}.LICENSE`;
+      
+      return Promise.all([
+        downloadFile(ffmpegReadmeUrl, `${ffmpegPath}.README`).catch(warnWith('Failed to download the ffmpeg README.')),
+        downloadFile(ffmpegLicenseUrl, `${ffmpegPath}.LICENSE`).catch(warnWith('Failed to download the ffmpeg LICENSE.'))
+      ]);
+    });
+}
+
+// Handle FFmpeg installation errors
+ffmpegPromise.catch(err => {
+  console.error('FFmpeg installation failed:', err);
+  process.exit(1);
+});
+
+// Download and install FFprobe (always from original source)
+ffmpegPromise
+  .then(() => downloadFile(ffprobeDownloadUrl, ffprobePath, getProgressIndicator('ffprobe')))
+  .then(() => {
+    // Make executable on Unix systems
+    if (platform !== 'win32') {
+      fs.chmodSync(ffprobePath, 0o755);
+    }
+    console.log(`Successfully installed ffprobe to ${ffprobePath}`);
+    
+    // Download README and LICENSE for ffprobe
+    const ffprobeReadmeUrl = `${originalBaseUrl}${release}/${originalPlatformName}.README`;
+    const ffprobeLicenseUrl = `${originalBaseUrl}${release}/${originalPlatformName}.LICENSE`;
+    
+    console.log('Downloading additional documentation...');
+    return Promise.all([
+      downloadFile(ffprobeReadmeUrl, `${ffprobePath}.README`).catch(warnWith('Failed to download the ffprobe README.')),
+      downloadFile(ffprobeLicenseUrl, `${ffprobePath}.LICENSE`).catch(warnWith('Failed to download the ffprobe LICENSE.'))
+    ]);
+  })
+  .then(() => {
+    // Clean up temp files
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch (err) {
+      console.warn('Warning: Failed to clean up temporary files', err);
+    }
+    console.log('Installation complete!');
+  })
+  .catch(err => {
+    console.error('FFprobe installation failed:', err);
+    process.exit(1);
+  });
