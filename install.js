@@ -1,30 +1,30 @@
 'use strict'
 
-var fs = require("fs");
-var os = require("os");
+const fs = require("fs");
+const os = require("os");
 const path = require('path');
 const {encode: encodeQuery} = require('querystring');
 const {strictEqual} = require('assert');
 const envPaths = require('env-paths');
 const FileCache = require('@derhuerst/http-basic/lib/FileCache').default;
 const {extname} = require('path');
-var ProgressBar = require("progress");
-var request = require('@derhuerst/http-basic');
+const ProgressBar = require("progress");
+const request = require('@derhuerst/http-basic');
 const {createGunzip} = require('zlib');
 const {pipeline} = require('stream');
 const {createUnzip} = require('zlib');
 const tar = require('tar');
 const yauzl = require('yauzl');
 const mkdirp = require('mkdirp');
-var {ffmpegPath, ffprobePath} = require(".");
-var pkg = require("./package");
+const {ffmpegPath, ffprobePath} = require(".");
+const pkg = require("./package");
 
 const exitOnError = (err) => {
   console.error(err);
   process.exit(1);
 };
 
-const warnWith = (msg) => (err) => {
+const warnWith = (msg) => () => {
   console.warn(msg);
 };
 
@@ -225,16 +225,16 @@ if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 if (!fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
 
 // Create base directory for ffmpeg/ffprobe
-const binDir = path.dirname(ffmpegPath);
-if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
+const binDir = ffmpegPath ? path.dirname(ffmpegPath) : null;
+if (binDir && !fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
 
 // Define the binary executable names based on platform
 const ffmpegExe = platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
-const ffprobeExe = platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
+// We use the ffprobeExe later in the code
 
 // Original source configuration
 const release = process.env.FFMPEG_BINARY_RELEASE || pkg['ffmpeg-static']['binary-release-tag'];
-const releaseName = pkg['ffmpeg-static']['binary-release-name'] || release;
+// releaseName is unused, so we'll remove it
 const originalBaseUrl = process.env.FFMPEG_FFPROBE_STATIC_BASE_URL || 'https://github.com/descriptinc/ffmpeg-ffprobe-static/releases/download/';
 
 // Platform-specific naming for original source
