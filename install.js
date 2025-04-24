@@ -147,31 +147,71 @@ function extractTarXz(filePath, outputDir) {
   return new Promise((resolve, reject) => {
     console.log(`Extracting XZ archive: ${filePath}`);
 
-    // Check if xz is available
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
+      return reject(new Error(`File not found: ${filePath}`));
+    }
+
     console.log('Using native xz and tar with piping');
-    const xz = spawn('xz', ['-dc', filePath]);
-    // Only extract bin directory to save space, exclude man pages and other unnecessary files
-    const fileName = path.basename(filePath);
-    const dirName = fileName.replace('.tar.xz', '');
-    const tar = spawn('tar', ['-xf', '-', '-C', outputDir, '--strip-components=1', `${dirName}/bin/ffmpeg`]);
-
-    xz.stdout.pipe(tar.stdin);
-
-    xz.stderr.on('data', (data) => {
-      console.log(`xz stdout: ${data}`);
+    
+    // First, decompress the XZ file to a temporary TAR file to avoid pipe buffer issues
+    const tempTarFile = filePath.replace('.tar.xz', '.tar');
+    const xzDecompress = spawn('xz', ['-dc', filePath]);
+    const tempTarStream = fs.createWriteStream(tempTarFile);
+    
+    xzDecompress.stdout.pipe(tempTarStream);
+    
+    xzDecompress.stderr.on('data', (data) => {
+      console.log(`xz stderr: ${data}`);
     });
-
-    tar.stderr.on('data', (data) => {
-      console.error(`tar stderr: ${data}`);
+    
+    xzDecompress.on('error', (err) => {
+      reject(new Error(`xz error: ${err.message}`));
     });
-
-    tar.on('close', (code) => {
-      if (code !== 0) return reject(new Error(`tar process exited with code ${code}`));
-      return resolve();
+    
+    tempTarStream.on('error', (err) => {
+      reject(new Error(`Error writing tar file: ${err.message}`));
     });
-
-    xz.on('error', reject);
-    tar.on('error', reject);
+    
+    tempTarStream.on('finish', () => {
+      console.log(`XZ decompression complete. Extracting TAR: ${tempTarFile}`);
+      
+      // Now extract from the TAR file
+      const fileName = path.basename(filePath);
+      const dirName = fileName.replace('.tar.xz', '');
+      
+      const tar = spawn('tar', [
+        '-xf', 
+        tempTarFile, 
+        '-C', 
+        outputDir, 
+        '--strip-components=1', 
+        `${dirName}/bin/ffmpeg`
+      ]);
+      
+      tar.stderr.on('data', (data) => {
+        console.error(`tar stderr: ${data}`);
+      });
+      
+      tar.on('close', (code) => {
+        // Clean up the temporary tar file
+        try {
+          fs.unlinkSync(tempTarFile);
+        } catch (e) {
+          console.warn(`Warning: Could not delete temporary tar file: ${e.message}`);
+        }
+        
+        if (code !== 0) {
+          return reject(new Error(`tar process exited with code ${code}`));
+        }
+        
+        return resolve();
+      });
+      
+      tar.on('error', (err) => {
+        reject(new Error(`tar error: ${err.message}`));
+      });
+    });
   });
 }
 
