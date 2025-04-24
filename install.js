@@ -244,7 +244,6 @@ if (!ffprobePath) {
 
 // Define the binary executable names based on platform
 const ffmpegExe = platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
-const ffprobeExe = platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
 
 // Original source configuration
 const release = process.env.FFMPEG_BINARY_RELEASE || 'b4.4.0-rc.11';
