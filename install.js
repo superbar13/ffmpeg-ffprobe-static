@@ -16,7 +16,7 @@ const {createUnzip} = require('zlib');
 const tar = require('tar');
 const yauzl = require('yauzl');
 const mkdirp = require('mkdirp');
-const {ffmpegPath, ffprobePath} = require(".");
+let {ffmpegPath, ffprobePath} = require(".");
 const pkg = require("./package");
 
 const exitOnError = (err) => {
