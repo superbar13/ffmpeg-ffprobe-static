@@ -12,8 +12,7 @@ const ProgressBar = require("progress");
 const request = require('@derhuerst/http-basic');
 const {createGunzip} = require('zlib');
 const {pipeline} = require('stream');
-const lzma = require('lzma-purejs');
-const tar = require('tar');
+const { spawn } = require('child_process');
 const yauzl = require('yauzl');
 const mkdirp = require('mkdirp');
 let {ffmpegPath, ffprobePath} = require(".");
@@ -144,55 +143,32 @@ function downloadFile(url, destinationPath, progressCallback = noop) {
   return promise;
 }
 
-const { spawn, execFile } = require('child_process');
-
 function extractTarXz(filePath, outputDir) {
   return new Promise((resolve, reject) => {
-    fs.access(filePath, fs.constants.F_OK | fs.constants.R_OK, (err) => {
-      if (err) {
-        return reject(new Error(`Cannot access file: ${err.message}`));
-      }
+    console.log(`Extracting XZ archive: ${filePath}`);
 
-      console.log(`Extracting XZ archive: ${filePath}`);
+    // Check if xz is available
+    console.log('Using native xz and tar with piping');
+    const xz = spawn('xz', ['-dc', filePath]);
+    const tar = spawn('tar', ['-xf', '-', '-C', outputDir, '--strip-components=1']);
 
-      // Check if xz is available
-      execFile('xz', ['--version'], (err) => {
-        if (err) {
-          console.log('Native xz not available, falling back to tar only');
-          // Fallback to tar directly (if tar supports .xz)
-          execFile('tar', ['-xf', filePath, '-C', outputDir, '--strip-components=1'], (err) => {
-            if (err) {
-              return reject(new Error(`Tar fallback extraction failed: ${err.message}`));
-            }
-            return resolve();
-          });
-        } else {
-          console.log('Using native xz and tar with piping');
-          const xz = spawn('xz', ['-dc', filePath]);
-          const tar = spawn('tar', ['-xf', '-', '-C', outputDir, '--strip-components=1']);
+    xz.stdout.pipe(tar.stdin);
 
-          xz.stdout.pipe(tar.stdin);
-
-          xz.stderr.on('data', (data) => {
-            console.error(`xz stderr: ${data}`);
-          });
-
-          tar.stderr.on('data', (data) => {
-            console.error(`tar stderr: ${data}`);
-          });
-
-          tar.on('close', (code) => {
-            if (code !== 0) {
-              return reject(new Error(`tar process exited with code ${code}`));
-            }
-            return resolve();
-          });
-
-          xz.on('error', reject);
-          tar.on('error', reject);
-        }
-      });
+    xz.stderr.on('data', (data) => {
+      console.error(`xz stderr: ${data}`);
     });
+
+    tar.stderr.on('data', (data) => {
+      console.error(`tar stderr: ${data}`);
+    });
+
+    tar.on('close', (code) => {
+      if (code !== 0) return reject(new Error(`tar process exited with code ${code}`));
+      return resolve();
+    });
+
+    xz.on('error', reject);
+    tar.on('error', reject);
   });
 }
 
