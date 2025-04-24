@@ -228,9 +228,23 @@ if (!fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
 const binDir = ffmpegPath ? path.dirname(ffmpegPath) : null;
 if (binDir && !fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
 
+// Add this code here:
+// Create base directory for ffmpeg/ffprobe if paths are undefined
+if (!ffmpegPath) {
+  const binDir = path.join(__dirname, 'bin');
+  if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
+  ffmpegPath = path.join(binDir, platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+}
+
+if (!ffprobePath) {
+  const binDir = path.join(__dirname, 'bin');
+  if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
+  ffprobePath = path.join(binDir, platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+}
+
 // Define the binary executable names based on platform
 const ffmpegExe = platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
-// We use the ffprobeExe later in the code
+const ffprobeExe = platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
 
 // Original source configuration
 const release = process.env.FFMPEG_BINARY_RELEASE || pkg['ffmpeg-static']['binary-release-tag'];
