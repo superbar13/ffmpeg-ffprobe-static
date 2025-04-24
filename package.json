@@ -50,10 +50,11 @@
     "@derhuerst/http-basic": "^8.2.0",
     "env-paths": "^2.2.0",
     "https-proxy-agent": "^5.0.0",
+    "lzma-native": "^8.0.6",
+    "mkdirp": "^1.0.4",
     "progress": "^2.0.3",
     "tar": "^6.1.11",
-    "yauzl": "^2.10.0", 
-    "mkdirp": "^1.0.4"
+    "yauzl": "^2.10.0"
   },
   "devDependencies": {
     "any-shell-escape": "^0.1.1",

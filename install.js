@@ -12,7 +12,7 @@ const ProgressBar = require("progress");
 const request = require('@derhuerst/http-basic');
 const {createGunzip} = require('zlib');
 const {pipeline} = require('stream');
-const {createUnzip} = require('zlib');
+const lzma = require('lzma-native');
 const tar = require('tar');
 const yauzl = require('yauzl');
 const mkdirp = require('mkdirp');
@@ -148,11 +148,8 @@ function downloadFile(url, destinationPath, progressCallback = noop) {
 function extractTarXz(filePath, outputDir) {
   return new Promise((resolve, reject) => {
     fs.createReadStream(filePath)
-      .pipe(createUnzip())
-      .pipe(tar.extract({
-        cwd: outputDir,
-        strip: 1 // Remove the top-level directory
-      }))
+      .pipe(lzma.createDecompressor())
+      .pipe(tar.extract({ cwd: outputDir, strip: 1 }))
       .on('error', reject)
       .on('end', resolve);
   });
