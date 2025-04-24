@@ -11,11 +11,12 @@ const {extname} = require('path');
 const ProgressBar = require("progress");
 const request = require('@derhuerst/http-basic');
 const {createGunzip} = require('zlib');
-const {pipeline} = require('stream');
-const { XzReadableStream }= require('xz-decompress');
+const { pipeline } = require('stream/promises');
+const { XzReadableStream } = require('xz-decompress');
 const tar = require('tar');
 const yauzl = require('yauzl');
 const mkdirp = require('mkdirp');
+const { Readable } = require('stream');
 let {ffmpegPath, ffprobePath} = require(".");
 const pkg = require("./package");
 
@@ -146,36 +147,31 @@ function downloadFile(url, destinationPath, progressCallback = noop) {
 
 // Extract .tar.xz files
 async function extractTarXz(srcPath, destDir) {
-  // 1. Stream-open the .xz file…
-  const inStream = fs.createReadStream(srcPath);
+  // 1. Open the .xz file as a Node.js Readable
+  const nodeStream = fs.createReadStream(srcPath);
 
-  // 2. Wrap it in XZ decompressor (JS/WebAssembly; no native libs)
-  const xzStream = new XzReadableStream(inStream);  // :contentReference[oaicite:0]{index=0}
+  // 2. Convert Node.js Readable → WHATWG ReadableStream
+  const webStream = Readable.toWeb(nodeStream);
 
-  // 3. Create tar extractor
-  const extract = tar.extract();                    // :contentReference[oaicite:1]{index=1}
+  // 3. Wrap in XZ decompressor
+  const xzStream = new XzReadableStream(webStream);
 
-  extract.on("entry", (header, stream, next) => {
-    const outPath = path.join(destDir, header.name);
-
-    if (header.type === "directory") {
-      fs.mkdirSync(outPath, { recursive: true });
-      stream.resume();
-      return next();
-    }
-
-    // ensure parent dirs exist
-    fs.mkdirSync(path.dirname(outPath), { recursive: true });
-
-    // write file with original permissions
-    const writer = fs.createWriteStream(outPath, { mode: header.mode });
-    stream.pipe(writer);
-    writer.on("finish", next);
+  // 4. Create tar extractor
+  const extract = tar.extract({
+    cwd: destDir,
+    strip: 1,              // optional: remove top-level folder
+    onentry: entry => {
+      // you can tap into each entry if needed
+    },
   });
 
-  // 4. Pipe decompressed tar into extractor
-  await pipeline(xzStream, extract);
-  console.log("Extraction complete!");
+  // 5. Pipe decompressed tar into extractor
+  await pipeline(
+    xzStream,
+    extract
+  );
+
+  console.log('Extraction complete!');
 }
 
 // Extract .zip files
